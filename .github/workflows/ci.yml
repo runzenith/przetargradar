@@ -1,0 +1,45 @@
+name: checks
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.4.10
+        env:
+          MYSQL_DATABASE: przetargradar
+          MYSQL_USER: radar
+          MYSQL_PASSWORD: radar_local
+          MYSQL_ROOT_PASSWORD: local_root_change_me
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -plocal_root_change_me"
+          --health-interval=5s --health-timeout=5s --health-retries=30
+    env:
+      DATABASE_URL: mysql://radar:radar_local@127.0.0.1:3306/przetargradar
+      DATABASE_URL_TEST: mysql://root:local_root_change_me@127.0.0.1:3306/przetargradar_test
+      ADMIN_TOKEN: ci-only-admin-token-123456789012
+      APP_MODE: DEMO
+      LOG_LEVEL: silent
+      DOCUMENTS_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: 10.33.2 }
+      - uses: actions/setup-node@v4
+        with: { node-version: 26, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm db:generate
+      - run: pnpm typecheck && pnpm test && pnpm build && pnpm format:check
+      - name: Create test database
+        run: MYSQL_PWD=local_root_change_me mysql -h 127.0.0.1 -u root -e 'CREATE DATABASE przetargradar_test CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci'
+      - run: pnpm test:integration
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm exec playwright test --config playwright.ui.config.ts
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: browser-diagnostics
+          path: test-results/

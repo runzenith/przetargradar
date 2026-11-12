@@ -1,0 +1,286 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model Tender {
+  userStates UserTender[]
+  id             String           @id @default(uuid()) @db.VarChar(36)
+  sourceKey      String           @unique @db.VarChar(191)
+  procedureId    String?          @db.VarChar(191)
+  title          String           @db.Text
+  buyer          String           @db.VarChar(500)
+  buyerCity      String?          @db.VarChar(191)
+  buyerRegion    String?          @db.VarChar(80)
+  cpv            String?          @db.VarChar(20)
+  category       String           @db.VarChar(20)
+  publishedAt    DateTime         @db.DateTime(3)
+  deadline       DateTime?        @db.DateTime(3)
+  sourceUrl      String?          @db.Text
+  status         String           @default("unknown") @db.VarChar(20)
+  statusBasis    String           @db.VarChar(500)
+  contentHash    String           @db.Char(64)
+  analysisStatus String           @default("pending") @db.VarChar(20)
+  estimatedValue Decimal?         @db.Decimal(18, 2)
+  currency       String?          @db.Char(3)
+  valueBasis     String?          @db.VarChar(20)
+  isDemo         Boolean          @default(false)
+  createdAt      DateTime         @default(now()) @db.DateTime(3)
+  updatedAt      DateTime         @updatedAt @db.DateTime(3)
+  notices        TenderNotice[]
+  analyses       TenderAnalysis[]
+  matches        TenderMatch[]
+
+  @@index([publishedAt])
+  @@index([deadline])
+  @@index([category, publishedAt])
+  @@index([buyerRegion])
+  @@index([cpv])
+  @@index([analysisStatus])
+  @@map("tenders")
+}
+
+model TenderNotice {
+  id           String        @id @default(uuid()) @db.VarChar(36)
+  tenderId     String        @db.VarChar(36)
+  sourceId     String        @db.VarChar(191)
+  noticeNumber String?       @db.VarChar(100)
+  noticeType   String        @db.VarChar(80)
+  procedureId  String?       @db.VarChar(191)
+  raw          Json
+  text         String        @db.LongText
+  contentHash  String        @db.Char(64)
+  publishedAt  DateTime      @db.DateTime(3)
+  fetchedAt    DateTime      @default(now()) @db.DateTime(3)
+  current      Boolean       @default(true)
+  tender       Tender        @relation(fields: [tenderId], references: [id])
+  jobs         AnalysisJob[]
+  documentScan DocumentScan?
+
+  @@unique([sourceId, contentHash])
+  @@index([tenderId, publishedAt])
+  @@map("tender_notices")
+}
+
+model TenderAnalysis {
+  id            String   @id @default(uuid()) @db.VarChar(36)
+  tenderId      String   @db.VarChar(36)
+  cacheKey      String   @unique @db.Char(64)
+  status        String   @db.VarChar(20)
+  provider      String   @db.VarChar(30)
+  model         String   @db.VarChar(100)
+  promptVersion String   @db.VarChar(30)
+  schemaVersion String   @db.VarChar(30)
+  inputHash     String   @db.Char(64)
+  result        Json?
+  scope         Json
+  durationMs    Int?
+  tokens        Int?
+  error         String?  @db.VarChar(500)
+  createdAt     DateTime @default(now()) @db.DateTime(3)
+  updatedAt     DateTime @updatedAt @db.DateTime(3)
+  tender        Tender   @relation(fields: [tenderId], references: [id])
+
+  @@index([tenderId, createdAt])
+  @@map("tender_analyses")
+}
+
+model AnalysisJob {
+  id          String       @id @default(uuid()) @db.VarChar(36)
+  noticeId    String       @db.VarChar(36)
+  dedupeKey   String       @unique @db.Char(64)
+  status      String       @default("pending") @db.VarChar(20)
+  attempts    Int          @default(0)
+  availableAt DateTime     @default(now()) @db.DateTime(3)
+  leaseUntil  DateTime?    @db.DateTime(3)
+  leaseOwner  String?      @db.VarChar(36)
+  error       String?      @db.VarChar(500)
+  createdAt   DateTime     @default(now()) @db.DateTime(3)
+  updatedAt   DateTime     @updatedAt @db.DateTime(3)
+  notice      TenderNotice @relation(fields: [noticeId], references: [id])
+
+  @@index([status, availableAt])
+  @@index([leaseUntil])
+  @@map("analysis_jobs")
+}
+
+model SyncState {
+  id         String    @id @db.VarChar(30)
+  requested  Boolean   @default(false)
+  checkpoint DateTime? @db.DateTime(3)
+  windowFrom DateTime? @db.DateTime(3)
+  windowTo   DateTime? @db.DateTime(3)
+  cursors    Json?
+  leaseUntil DateTime? @db.DateTime(3)
+  leaseOwner String?   @db.VarChar(36)
+
+  @@map("sync_state")
+}
+
+model SyncLog {
+  filtered Int @default(0)
+  sourceId String @default("bzp") @db.VarChar(30)
+  id            String    @id @default(uuid()) @db.VarChar(36)
+  startedAt     DateTime  @default(now()) @db.DateTime(3)
+  finishedAt    DateTime? @db.DateTime(3)
+  status        String    @db.VarChar(20)
+  windowFrom    DateTime  @db.DateTime(3)
+  windowTo      DateTime  @db.DateTime(3)
+  pages         Int       @default(0)
+  fetched       Int       @default(0)
+  created       Int       @default(0)
+  changed       Int       @default(0)
+  skipped       Int       @default(0)
+  errors        Int       @default(0)
+  errorSummary  String?   @db.VarChar(500)
+  correlationId String    @unique @db.VarChar(36)
+
+  @@index([sourceId, startedAt])
+  @@index([startedAt])
+  @@map("sync_logs")
+}
+
+model AiBudget {
+  nextCallAt DateTime? @db.DateTime(3)
+  day   String @id @db.VarChar(10)
+  calls Int    @default(0)
+
+  @@map("ai_budgets")
+}
+
+model AiProviderState {
+  id String @id @db.VarChar(100)
+  pausedUntil DateTime @db.DateTime(3)
+  error String @db.VarChar(500)
+}
+
+model AiQuotaLock {
+ id String @id @db.VarChar(191)
+}
+model AiCall {
+ id String @id @default(uuid()) @db.VarChar(36)
+ model String @db.VarChar(100)
+ jobId String @db.VarChar(36)
+ startedAt DateTime @default(now()) @db.DateTime(3)
+ finishedAt DateTime? @db.DateTime(3)
+ pacificDay String @db.VarChar(10)
+ reservedTokens Int
+ tokens Int?
+ status String @default("processing") @db.VarChar(30)
+ code String? @db.VarChar(500)
+ @@index([model, startedAt])
+ @@index([model, pacificDay])
+}
+
+model User {
+  id String @id @default(uuid()) @db.VarChar(36)
+  email String @unique @db.VarChar(191)
+  passwordHash String @db.VarChar(255)
+  createdAt DateTime @default(now())
+  sessions Session[]
+  states UserTender[]
+}
+model Session {
+  tokenHash String @id @db.Char(64)
+  userId String @db.VarChar(36)
+  csrf String @db.Char(64)
+  expiresAt DateTime
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId])
+  @@index([expiresAt])
+}
+model UserTender {
+  userId String @db.VarChar(36)
+  tenderId String @db.VarChar(36)
+  saved Boolean @default(false)
+  readAt DateTime?
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tender Tender @relation(fields: [tenderId], references: [id])
+  @@id([userId, tenderId])
+  @@index([userId, saved])
+}
+
+// Stage 2 foundation only; no endpoints or user-facing scoring in Stage 1.
+model CompanyProfile {
+  id           String        @id @default(uuid()) @db.VarChar(36)
+  ownerId      String        @db.VarChar(36)
+  version      Int           @default(1)
+  description  String        @db.Text
+  services     Json
+  exclusions   Json
+  regions      Json
+  cpvCodes     Json
+  competencies Json
+  minValue     Decimal?      @db.Decimal(18, 2)
+  maxValue     Decimal?      @db.Decimal(18, 2)
+  currency     String?       @db.Char(3)
+  valueBasis   String?       @db.VarChar(20)
+  createdAt    DateTime      @default(now()) @db.DateTime(3)
+  matches      TenderMatch[]
+
+  @@unique([ownerId, version])
+  @@map("company_profiles")
+}
+
+model TenderMatch {
+  id                 String         @id @default(uuid()) @db.VarChar(36)
+  profileId          String         @db.VarChar(36)
+  tenderId           String         @db.VarChar(36)
+  contentHash        String         @db.Char(64)
+  scoringVersion     String         @db.VarChar(30)
+  score              Int
+  components         Json
+  explanation        String         @db.Text
+  missingInformation Json
+  createdAt          DateTime       @default(now()) @db.DateTime(3)
+  profile            CompanyProfile @relation(fields: [profileId], references: [id])
+  tender             Tender         @relation(fields: [tenderId], references: [id])
+
+  @@unique([profileId, tenderId, contentHash, scoringVersion])
+  @@index([profileId, score])
+  @@map("tender_matches")
+}
+
+model SyncRejectedRecord {
+  mode String @db.VarChar(10)
+  recordKey String @id @db.Char(64)
+  sourceId String @db.VarChar(30)
+  noticeType String @db.VarChar(80)
+  externalId String? @db.VarChar(191)
+  raw Json
+  code String @db.VarChar(80)
+  attempts Int @default(1)
+  firstSeenAt DateTime @default(now()) @db.DateTime(3)
+  lastSeenAt DateTime @updatedAt @db.DateTime(3)
+  resolvedAt DateTime? @db.DateTime(3)
+  @@index([sourceId, resolvedAt])
+  @@map("sync_rejected_records")
+}
+
+model DocumentAsset {
+ byteSize Int @default(0)
+ id String @id @db.Char(64)
+ url String @db.Text
+ bytes Bytes? @db.LongBlob
+ contentHash String? @db.Char(64)
+ text String @db.LongText
+ status String @db.VarChar(40)
+ checkedAt DateTime @db.DateTime(3)
+ @@map("document_assets")
+}
+model DocumentScan {
+ noticeId String @id @db.VarChar(36)
+ status String @default("pending") @db.VarChar(20)
+ report Json
+ materials Json
+ nextAt DateTime @db.DateTime(3)
+ leaseUntil DateTime? @db.DateTime(3)
+ leaseOwner String? @db.VarChar(36)
+ notice TenderNotice @relation(fields:[noticeId],references:[id])
+ @@index([nextAt])
+ @@map("document_scans")
+}
